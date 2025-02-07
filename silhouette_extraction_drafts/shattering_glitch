@@ -1,0 +1,192 @@
+import processing.video.*;
+
+Capture video; // video must be stored in capture object
+PImage frozenSil; // captured frozen silhouette object
+int captureDuration = 120; 
+int frameCounter = 0;
+boolean silhouetteCaptured = false;
+
+// two main glitch objects: 0 = melting, 1 = fragmentation/shattering
+// the fragmentation filter visually dominates the melting filter, unfortunately 
+Glitch[] glitches; // glitch object array 
+
+void setup(){
+  size(640, 480);
+  video = new Capture(this, 640, 480);
+  video.start();
+  frozenSil = createImage(width, height, RGB); //syntax is createImage(w, h, format)  
+  frozenSil.loadPixels(); // loads pixel data for image into pixels[]. This's required before manipulating image's pixel values.
+  for (int i = 0; i < frozenSil.pixels.length; i++){
+    frozenSil.pixels[i] = color(0); 
+  }
+  frozenSil.updatePixels(); //commits modifications to pixels[]
+  
+  // creates two glitch objects: meltdown (0), fragmentation (1)
+  glitches = new Glitch[2];
+  glitches[0] = new Glitch(0);
+  glitches[1] = new Glitch(1);
+  
+  background(0);
+}
+
+void draw(){
+  background(0); 
+  // 1) capture silhouette for the first few seconds
+  if (!silhouetteCaptured) {
+    if (video.available()) {
+      video.read();
+    }
+    
+    PImage currentFrame = video.get();  // gets the current frame, copies into new image
+    currentFrame.filter(GRAY); // converts to grayscale
+    currentFrame.filter(THRESHOLD, 0.5); // converts grayscale image into a binary 1/0 image
+    
+    // apply edge detection using a custom convolution function
+    float[] edgeKernel = {
+      -1, -1, -1,
+      -1,  8, -1,
+      -1, -1, -1
+    };
+    currentFrame = customConvolve(currentFrame, edgeKernel);
+    frozenSil = currentFrame.get(); // save current frozen silhouette
+    frameCounter++; 
+                                                                        
+    if (frameCounter >= captureDuration) {
+      silhouetteCaptured = true; // keeps silhouette #120
+    }
+  }
+
+  // 2) once captured, apply glitch effects 
+  if (silhouetteCaptured) {
+    PImage glitched = frozenSil.get(); // get most recent frozen silhouette
+    glitched = glitches[0].applyGlitch(glitched); //melting
+    glitched = glitches[1].applyGlitch(glitched); //shattering
+    image(glitched, 0, 0, width, height);
+  }
+}
+
+/*
+Custom convolution function to apply a 3x3 kernel for edge detection.
+It calculates the weighted sum of each pixel’s 3x3 neighborhood.
+ */
+
+//takes source image and convolution kernal as input
+PImage customConvolve(PImage src, float[] kernel){
+  int kernelSize = 3;
+  PImage result = createImage(src.width, src.height, RGB);
+  
+  src.loadPixels();
+  result.loadPixels();
+  
+  for (int y = 0; y < src.height; y++){ 
+    for (int x = 0; x < src.width; x++){
+      float sum = 0;
+      int half = kernelSize / 2;
+      for (int ky = -half; ky <= half; ky++){ 
+        for (int kx = -half; kx <= half; kx++){
+          int sx = x + kx; //sx and sy represent actual src image coordinates corresponding to current kernel element
+          int sy = y + ky; //add the kernel offsets (kx, ky) to the current pixel (x, y)
+          int kIdx = (ky + half) * kernelSize + (kx + half);
+          if (sx >= 0 && sx < src.width && sy >= 0 && sy < src.height) { //checks current (sx, sy) lie within bounds of src image
+            float c = brightness(src.pixels[sy * src.width + sx]); 
+            sum += c * kernel[kIdx]; //use brightness to update grayscale value of pixel with weighted value
+          }
+        }
+      }
+      sum = constrain(sum, 0, 255);
+      result.pixels[y * src.width + x] = color(sum); //update pixels[] with weighted grayscale values
+    }
+  }
+  
+  result.updatePixels();
+  return result;
+}
+
+//glitch class
+class Glitch {
+  int type;
+  float intensity;
+  float noiseOffset;
+  
+  Glitch(int t){
+    type = t;
+    intensity = random(5, 20); //random() to create more organic look
+    noiseOffset = random(1000);
+  }
+  
+  PImage applyGlitch(PImage img){ // iterate through glitch obj array
+    if (type == 0) { 
+      return meltDown(img, intensity);
+    } else if (type == 1) {
+      return fragment(img, intensity);
+    }
+    return img;
+  }
+  
+  // meltdown creates a slow vertical dripping effect like candle wax melting
+  PImage meltDown(PImage source, float meltAmount){
+    PImage result = createImage(source.width, source.height, RGB); 
+    source.loadPixels();
+    result.loadPixels();
+    
+    for (int y = 0; y < source.height; y++){ //use a very small multipliers to slow down melting
+      for (int x = 0; x < source.width; x++){
+        int index = y * source.width + x;
+        float n = noise(x * 0.003, (y + frameCount) * 0.003 + noiseOffset); // scales the x-coord so nearby pixels have similar noise values 
+        int offset = int(map(n, 0, 1, 0, meltAmount * 0.2)); // map to a small offset range for a slow, smooth drip
+        
+        int newY = y + offset;
+        newY = constrain(newY, 0, source.height - 1);  //clamp so pixels drip downwards instead of wrapping around
+        int newIndex = newY * source.width + x;
+        result.pixels[newIndex] = source.pixels[index];
+      }
+    }
+    result.updatePixels();
+    return result;
+  }
+  
+  // fragmentation shifts each segment by a noise-determined offset that increases over time.
+  PImage fragment(PImage source, float fragAmount) {
+    PImage result = createImage(source.width, source.height, RGB); // create new image (result) of the same size as the source.
+    result.loadPixels(); // fill the result image with black.
+    for (int i = 0; i < result.pixels.length; i++) {
+      result.pixels[i] = color(0);
+    }
+    source.loadPixels();
+  
+  // calculate time since the silhouette was captured.
+  float t = (frameCount - captureDuration) / 60.0;
+  for (int y = 0; y < source.height; y++) {
+    int x = 0;
+    while (x < source.width) {
+      int index = y * source.width + x;
+      if (brightness(source.pixels[index]) > 240) { // check if the pixel is white using brightness threshold
+        int segStart = x;
+        // find line segment of white pixels.
+        while (x < source.width && brightness(source.pixels[y * source.width + x]) > 240) {
+          x++;
+        }
+        int segEnd = x - 1;
+        // compute random offsets for this segment using noise
+        // use the row and the starting x position to seed noise with map
+        float offX = map(noise(y * 0.1, segStart * 0.1, t * 0.1 + noiseOffset), 0, 1, -fragAmount * t, fragAmount * t);
+        float offY = map(noise(y * 0.12, segStart * 0.12, t * 0.1 + noiseOffset), 0, 1, -fragAmount * t, fragAmount * t);
+        
+        // for every pixel in the contiguous white segment, shift its position.
+        for (int sx = segStart; sx <= segEnd; sx++) {
+          int srcIndex = y * source.width + sx;
+          int dstX = constrain(sx + int(offX), 0, source.width - 1); //https://processing.org/reference/constrain_.html
+          int dstY = constrain(y + int(offY), 0, source.height - 1);
+          int dstIndex = dstY * source.width + dstX;
+          result.pixels[dstIndex] = source.pixels[srcIndex];
+        }
+      } else {
+        x++;
+      }
+    }
+  }
+  
+  result.updatePixels();
+  return result;
+  }
+}
