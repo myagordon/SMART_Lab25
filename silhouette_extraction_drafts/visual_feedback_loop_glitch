@@ -1,0 +1,100 @@
+//Continuously store the participant’s thresholded silhouette in a PGraphics buffer,
+//re-drawing it each frame with slight offsets or transformations,
+//creating a feedback effect that accumulates -> silhouette smears.
+//also implements data bending which overwrites middle region of the screen with portion of sil from prev frame
+import processing.video.*;
+Capture cam;
+PImage posterized;       // for storing grayscale + posterized frame
+PGraphics feedback;      // feedback buffer
+
+int posterizeLevels = 4; // number of gray levels, i like the contoured look multiple posterize levels provides
+boolean showRaw = false; // press 'r' to toggle raw camera
+float fadeAlpha = 1;     // smaller alpha => more dramatic smearing effect
+
+void setup() {
+  size(640, 480);
+  String[] cameras = Capture.list();
+  cam = new Capture(this, cameras[0]);
+  cam.start();
+
+  // create an image for the posterized result
+  posterized = createImage(width, height, RGB);
+  // create a PGraphics for smearing/glitch
+  feedback = createGraphics(width, height);
+  feedback.beginDraw();
+  feedback.background(0);
+  feedback.endDraw();
+}
+
+void draw() {
+  background(0);
+  if (cam.available()) {
+    cam.read();
+  }
+  // convert cam to grayscale + posterize
+  cam.filter(GRAY);
+  cam.filter(POSTERIZE, float(posterizeLevels));
+
+  // copy the processed webcam to posterized image
+  posterized.copy(cam, 0, 0, cam.width, cam.height, 0, 0, width, height);
+
+  // update the feedback buffer (apply smearing + glitch)
+  feedback.beginDraw();
+
+  // fade out old content based on alpha value
+  feedback.fill(0, fadeAlpha);
+  feedback.noStroke();
+  feedback.rect(0, 0, width, height);
+
+  // draw posterized image
+  feedback.image(posterized, 0, 0);
+
+  dataBend(feedback);
+
+  feedback.endDraw();
+  //draw feedback buffer with glitch modifications
+  image(feedback, 0, 0);
+
+  // show raw camera in corner
+  if (showRaw) {
+    image(cam, 0, 0, 160, 120);
+  }
+}
+
+// simple data bending: copy random chunk from bottom area to top area
+void dataBend(PGraphics pg) {
+  int bendIterations = 5;         
+  float bendProbability = 0.5;    
+
+  for (int i = 0; i < bendIterations; i++) {
+    if (random(1) < bendProbability) {
+      int chunkHeight = (int) random(100, 950);
+      int chunkWidth  = (int) random(180, 220);
+      int srcX = (int) random(0, pg.width - chunkWidth); //adjust these values so it glitches over the region occupied by the participant
+      int srcY = (int) random(pg.height/2, pg.height - chunkHeight);
+
+      int destX = srcX + (int) random(-20, 20);
+      int destY = (int) random(40, pg.height-40);
+
+      destX = constrain(destX, 0, pg.width - chunkWidth);
+      destY = constrain(destY, 0, pg.height - chunkHeight);
+
+      pg.copy(srcX, srcY, chunkWidth, chunkHeight,
+              destX, destY, chunkWidth, chunkHeight);
+    }
+  }
+}
+
+// Key presses
+void keyPressed() {
+  if (key == 'r' || key == 'R') {
+    showRaw = !showRaw;
+  }
+  if (key == 'c' || key == 'C') {
+    // Clear feedback buffer
+    feedback.beginDraw();
+    feedback.background(0);
+    feedback.endDraw();
+  }
+}
+    
