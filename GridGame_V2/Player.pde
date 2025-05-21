@@ -1,3 +1,4 @@
+//file: Player.pde
 class Player {
   int id, x, y; //player ID and position
   color col; //player color
