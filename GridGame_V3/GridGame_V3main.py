@@ -38,5 +38,7 @@ if __name__ == "__main__":
     success_rate = float(sys.argv[2])
     round_num = int(sys.argv[3])
 
-    threshold = generate_threshold(current_score, success_rate, round_num)
-    print(threshold)
+    earn_pts_thresh = generate_threshold(current_score, success_rate, round_num)
+    lose_pts_thresh = generate_threshold(current_score, success_rate, round_num)
+    print(earn_pts_thresh)
+    print(lose_pts_thresh)
