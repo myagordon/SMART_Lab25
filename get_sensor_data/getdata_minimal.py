@@ -3,6 +3,9 @@
 # Requires Python >= 3 and blake library
 # This program has been tested in Linux and Windows
 
+#Tested on MacOS device on 07.05 by Mya Gordon
+#Must use different sensor ID for Mac laptops: E4A1AC98-624F-FF6B-8748-0FADC0A75A29
+
 from bleak import BleakClient
 import asyncio
 import struct
