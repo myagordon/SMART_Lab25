@@ -4,6 +4,8 @@
 # This program has been tested in Linux and Windows
 
 #Tested on MacOS device by Mya Gordon on 7/07
+#This script sends data to processing in real time
+#No error correction capabilities in this version. Must restart to recalibrate.
 
 from bleak import BleakClient
 import asyncio
