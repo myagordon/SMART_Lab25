@@ -4,8 +4,6 @@
 # This program has been tested in Linux and Windows
 
 #Tested on MacOS device by Mya Gordon on 7/07
-#This script sends data to processing in real time
-#No error correction capabilities in this version. Must restart to recalibrate.
 
 from bleak import BleakClient
 import asyncio
@@ -14,6 +12,8 @@ import signal
 import sys
 import time
 from pythonosc import udp_client 
+from pythonosc.osc_server import AsyncIOOSCUDPServer
+from pythonosc.dispatcher import Dispatcher
 
 # Constants
 DATA_CHARACTERISTIC_UUID = "6d071524-e3b8-4428-b7b6-b3f59c38b7bb"
@@ -26,6 +26,7 @@ CRTL_CONTINUOUS_MODE_100HZ = 0x68
 
 # Global variables
 g_quit = False
+g_reset_requested = False  # Flag for OSC reset requests
 
 # OSC client setup (NEW)
 osc_client = udp_client.SimpleUDPClient("127.0.0.1", 6800)
@@ -34,6 +35,12 @@ def signal_handler(sig, frame): # CTRL-C, quits (gracefully) closing BLE comms
 	global g_quit
 	print('Quitting program!')
 	g_quit = True
+
+# OSC handler for reset commands
+def osc_reset_handler(unused_addr, *args):
+	global g_reset_requested
+	print('OSC reset command received')
+	g_reset_requested = True
 
 def notification_handler(sender, data): # parse data packet
 	# Packet size = 20
@@ -70,9 +77,18 @@ def notification_handler(sender, data): # parse data packet
 	osc_client.send_message("/position", [x,y]) # Send OSC messages, only x and y position for now 
 
 async def run(argv): # BLE comms
+	global g_reset_requested  # Access global variable
 	if(len(argv) == 1):
 		print("Error: insufficient arguments")
 		raise SystemExit
+	
+	# Setup OSC server before BLE connection to listen for reset command
+	dispatcher = Dispatcher()
+	dispatcher.map("/reset", osc_reset_handler)
+	server = AsyncIOOSCUDPServer(("127.0.0.1", 6801), dispatcher, asyncio.get_event_loop())
+	transport, protocol = await server.create_serve_endpoint()
+	print("OSC server listening on port 6801 for /reset commands")
+
 	async with BleakClient(argv[1], timeout = 4.0) as client:
 		if client.is_connected:
 			print("Sensor Connected")
@@ -100,8 +116,18 @@ async def run(argv): # BLE comms
 
 		# Start streaming
 		await client.start_notify(DATA_CHARACTERISTIC_UUID, notification_handler)
+		
 		while (not g_quit): # quit with CRTL-C
-			await asyncio.sleep(1.0)
+			# Check for OSC reset requests
+			if g_reset_requested:
+				await client.write_gatt_char(CRTL_CHARACTERISTIC_UUID,  bytearray([CRTL_RESET]))
+				print('System was reset via OSC')
+				g_reset_requested = False
+				
+			await asyncio.sleep(0.1)  # Shorter sleep for more responsive reset
+		
+		# Close OSC server
+		transport.close()
 
 # Main program
 print('Requires Python > 3');
