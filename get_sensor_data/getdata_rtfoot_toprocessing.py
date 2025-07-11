@@ -136,5 +136,6 @@ print('\tMAC_ADDRESS = Bluetooth address formated as XX:XX:XX:XX:XX:XX');
 print('\tr = reset [optional]');
 print('\tcFREQ = continious mode and frequency (FREQ: 25, 50, 100) [optional]');
 print('\teg: python3 getdata_rtfoot.py 12:34:56:78:90:AB r c55');
+print('\tSend OSC message to /reset on port 6801 to reset sensor remotely');
 signal.signal(signal.SIGINT, signal_handler)
 asyncio.run(run(sys.argv))
