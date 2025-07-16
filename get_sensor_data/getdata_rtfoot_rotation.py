@@ -10,7 +10,7 @@ import asyncio
 import struct
 import signal
 import sys
-import time
+#import time
 import numpy as np
 from pythonosc import udp_client 
 from pythonosc.osc_server import AsyncIOOSCUDPServer
@@ -31,10 +31,8 @@ g_quit = False
 g_reset_requested = False  # Flag for OSC reset requests
 
 # Tilt correction variables
-g_calibration_samples = []
 g_calibration_rotation_matrix = None
 g_collecting_calibration = True
-CALIBRATION_SAMPLE_COUNT = 20
 
 # Graphing variables
 g_raw_x = []
@@ -93,91 +91,75 @@ def plot_comparison():
 	plt.show()
 	
     
+def rotation_matrix_z(degrees):
+    """Create a 3x3 rotation matrix for rotation around Z-axis by degrees."""
+    radians = np.radians(degrees)
+    cos = np.cos(radians)
+    sin = np.sin(radians)
+    return np.array([
+        [cos, -sin, 0],
+        [sin,  cos, 0],
+        [0,    0,   1]
+    ])
+
 def notification_handler(sender, data): # parse data packet
-	global g_calibration_samples, g_calibration_rotation_matrix, g_collecting_calibration
-	global g_raw_x, g_raw_y, g_corrected_x, g_corrected_y, g_sample_count
-	
-	# Packet size = 20
-	# Packet structure
-	# Sample(2), Status(1), X(3), Y(3), Z(3), Q0(2), Q1(2), Q2(2), Q3(2)
+    global g_calibration_rotation_matrix, g_collecting_calibration
+    global g_raw_x, g_raw_y, g_corrected_x, g_corrected_y, g_sample_count
 
-	# Sample number = data[0 ..1]
-	sample = struct.unpack('<H', data[0:2])[0]
-	print("Sample:", sample)
+    # Packet structure
+    sample = struct.unpack('<H', data[0:2])[0]
+    status = struct.unpack('B', data[2:3])[0]
 
-	# Status byte = data[2]
-	status = struct.unpack('B', data[2:3])[0]
-	print("Status:", status)
+    x = struct.unpack('<i',data[2:6])[0] / 256
+    y = struct.unpack('<i',data[5:9])[0] / 256
+    z = struct.unpack('<i',data[8:12])[0] / 256
 
-	# Position is provided using a 3-byte integer format in millimeters.
-	# Use an auxiliary byte to simplify conversion,
-	# because it is little endian (least significant first),
-	# the extra byte must be included at the beginning.
-	# To eliminate the effect of adding the additional byte,
-	# the final solution is shifted to the right or dividing by 256
-	# Positions: X=data[3..5], Y=data[6...8], Z=data[9...11]
-	x = struct.unpack('<i',data[2:6])[0] / 256
-	y = struct.unpack('<i',data[5:9])[0] / 256
-	z = struct.unpack('<i',data[8:12])[0] / 256
-	print ("Pos:", x, y, z)
+    q0 = float(struct.unpack('<h', data[12:14])[0]) / 32768
+    q1 = float(struct.unpack('<h', data[14:16])[0]) / 32768
+    q2 = float(struct.unpack('<h', data[16:18])[0]) / 32768
+    q3 = float(struct.unpack('<h', data[18:20])[0]) / 32768
 
-	# Quaternions are provided using a short representation where 2^15 is equivalent to 1 (SF = 1/32768)
-	# Quaternions:  Q0=data[12..13], Q1=data[14..15], Q2=data[16..17], Q3=data[18..19]
-	q0 = float(struct.unpack('<h', data[12:14])[0]) / 32768
-	q1 = float(struct.unpack('<h', data[14:16])[0]) / 32768
-	q2 = float(struct.unpack('<h', data[16:18])[0]) / 32768
-	q3 = float(struct.unpack('<h', data[18:20])[0]) / 32768
-	print("Qua:", q0, q1, q2, q3)
-	
-	# Collect calibration samples
-	if g_collecting_calibration:
-		g_calibration_samples.append((q0, q1, q2, q3))
-		print(f"Collecting calibration sample {len(g_calibration_samples)}/{CALIBRATION_SAMPLE_COUNT}")
-		
-		if len(g_calibration_samples) >= CALIBRATION_SAMPLE_COUNT:
-			# Calculate average quaternion
-			avg_q0 = sum(sample[0] for sample in g_calibration_samples) / len(g_calibration_samples)
-			avg_q1 = sum(sample[1] for sample in g_calibration_samples) / len(g_calibration_samples)
-			avg_q2 = sum(sample[2] for sample in g_calibration_samples) / len(g_calibration_samples)
-			avg_q3 = sum(sample[3] for sample in g_calibration_samples) / len(g_calibration_samples)
-			
-			# Create inverse rotation matrix from average quaternion
-			R = quaternion_to_rotation_matrix(avg_q0, avg_q1, avg_q2, avg_q3)
-			g_calibration_rotation_matrix = R.T  # Transpose for inverse rotation
-			
-			g_collecting_calibration = False
-			print(f"Calibration complete. Average quaternion: ({avg_q0:.3f}, {avg_q1:.3f}, {avg_q2:.3f}, {avg_q3:.3f})")
-		
-		# Don't send data during calibration
-		return
-	
-	# Store raw values for graphing
-	g_raw_x.append(x)
-	g_raw_y.append(y)
-	
-	# Apply tilt correction if calibration is complete
-	if g_calibration_rotation_matrix is not None:
-		# Apply inverse rotation to correct tilt
-		pos_vector = np.array([x, y, z])
-		corrected_pos = g_calibration_rotation_matrix @ pos_vector
-		x, y, z = corrected_pos
-		print(f"Corrected Pos: {x:.2f}, {y:.2f}, {z:.2f}")
-	
-	# Store corrected values for graphing
-	g_corrected_x.append(x)
-	g_corrected_y.append(y)
-	
-	# Increment sample count and check if we should plot
-	g_sample_count += 1
-	if g_sample_count == GRAPH_SAMPLE_COUNT:
-		print(f"Reached {GRAPH_SAMPLE_COUNT} samples - generating comparison plot...")
-		plot_comparison()
-	
-	osc_client.send_message("/position", [x,y]) # Send OSC messages, only x and y position for now 
+    print(f"Sample: {sample} Status: {status} Pos: ({x:.2f}, {y:.2f}, {z:.2f}) Qua: ({q0:.3f}, {q1:.3f}, {q2:.3f}, {q3:.3f})")
+
+    if g_collecting_calibration:
+        R_calib = quaternion_to_rotation_matrix(q0, q1, q2, q3)
+        R_inv = R_calib.T  # inverse of calibration quaternion
+
+        # apply fixed additional correction: 10 degrees about Z
+        R_fixed = rotation_matrix_z(10)
+
+        # combine: first undo calibration rotation, then apply fixed correction
+        g_calibration_rotation_matrix = R_fixed @ R_inv
+
+        g_collecting_calibration = False
+        print("Calibration complete. Applied fixed -10° Z rotation.")
+        return  # skip sending first sample
+
+    # store raw for graph
+    g_raw_x.append(x)
+    g_raw_y.append(y)
+
+    # correct
+    pos_vec = np.array([x, y, z])
+    corrected = g_calibration_rotation_matrix @ pos_vec
+    x_corr, y_corr, z_corr = corrected
+
+    g_corrected_x.append(x_corr)
+    g_corrected_y.append(y_corr)
+
+    print(f"Corrected Pos: ({x_corr:.2f}, {y_corr:.2f}, {z_corr:.2f})")
+
+    # plot if enough samples
+    g_sample_count += 1
+    if g_sample_count == GRAPH_SAMPLE_COUNT:
+        print(f"Reached {GRAPH_SAMPLE_COUNT} samples - generating comparison plot...")
+        plot_comparison()
+
+    osc_client.send_message("/position", [x_corr, y_corr])
 
 async def run(argv): # BLE comms
 	global g_reset_requested  # Access global variable
-	global g_calibration_samples, g_calibration_rotation_matrix, g_collecting_calibration
+	global g_calibration_rotation_matrix, g_collecting_calibration
 	global g_raw_x, g_raw_y, g_corrected_x, g_corrected_y, g_sample_count
 	
 	if(len(argv) == 1):
@@ -227,7 +209,6 @@ async def run(argv): # BLE comms
 				g_reset_requested = False
 				
 				# Reset calibration after OSC reset
-				g_calibration_samples = []
 				g_calibration_rotation_matrix = None
 				g_collecting_calibration = True
 				print("Restarting calibration after reset...")
@@ -239,7 +220,7 @@ async def run(argv): # BLE comms
 				g_corrected_y = []
 				g_sample_count = 0
 				
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(0.1)  # Shorter sleep for more responsive reset
 		
 		# Close OSC server
 		transport.close()
@@ -252,7 +233,6 @@ print('\tr = reset [optional]');
 print('\tcFREQ = continious mode and frequency (FREQ: 25, 50, 100) [optional]');
 print('\teg: python3 getdata_rtfoot.py 12:34:56:78:90:AB r c55');
 print('\tSend OSC message to /reset on port 6801 to reset sensor remotely');
-print(f'\tTilt correction: collects first {CALIBRATION_SAMPLE_COUNT} samples for calibration');
 print(f'\tGraphing: will display raw vs corrected X,Y positions after {GRAPH_SAMPLE_COUNT} samples');
 signal.signal(signal.SIGINT, signal_handler)
 asyncio.run(run(sys.argv))
