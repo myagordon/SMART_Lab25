@@ -14,6 +14,7 @@ import time
 from pythonosc import udp_client 
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
+import matplotlib.pyplot as plt
 
 # Constants
 DATA_CHARACTERISTIC_UUID = "6d071524-e3b8-4428-b7b6-b3f59c38b7bb"
@@ -27,8 +28,12 @@ CRTL_CONTINUOUS_MODE_100HZ = 0x68
 # Global variables
 g_quit = False
 g_reset_requested = False  # Flag for OSC reset requests
+#graphing variables
+g_x_data, g_y_data = [], []
+g_sample_count = 0
+GRAPH_SAMPLE_COUNT = 20  # Graph after collecting 50 samples
 
-# OSC client setup (NEW)
+# OSC client setup 
 osc_client = udp_client.SimpleUDPClient("127.0.0.1", 6800)
 
 def signal_handler(sig, frame): # CTRL-C, quits (gracefully) closing BLE comms
@@ -41,6 +46,19 @@ def osc_reset_handler(unused_addr, *args):
 	global g_reset_requested
 	print('OSC reset command received')
 	g_reset_requested = True
+
+#graphing
+def plot_xy_path():
+    plt.figure(figsize=(8, 6))
+    plt.plot(g_x_data, g_y_data, 'b-', linewidth=2, label='Foot Path')
+    plt.scatter(g_x_data, g_y_data, c='red', s=20, alpha=0.7)
+    plt.xlabel('X Position (mm)')
+    plt.ylabel('Y Position (mm)')
+    plt.title('Foot Movement Path')
+    plt.legend()
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()
 
 def notification_handler(sender, data): # parse data packet
 	# Packet size = 20
@@ -66,6 +84,16 @@ def notification_handler(sender, data): # parse data packet
 	y = struct.unpack('<i',data[5:9])[0] / 256
 	z = struct.unpack('<i',data[8:12])[0] / 256
 	print ("Pos:", x, y, z)
+
+	#graphing 
+	global g_x_data, g_y_data, g_sample_count
+	g_x_data.append(x)
+	g_y_data.append(y)
+	g_sample_count +=1
+
+	if g_sample_count == GRAPH_SAMPLE_COUNT:
+		print("plotting now...")
+		plot_xy_path()
 
 	# Quaternions are provided using a short representation where 2^15 is equivalent to 1 (SF = 1/32768)
 	# Quaternions:  Q0=data[12..13], Q1=data[14..15], Q2=data[16..17], Q3=data[18..19]
@@ -111,6 +139,9 @@ async def run(argv): # BLE comms
 		if((len(argv) >= 3 and argv[2][0] == 'r') or (len(argv) == 4 and argv[3][0] == 'r')):
 			await client.write_gatt_char(CRTL_CHARACTERISTIC_UUID,  bytearray([CRTL_RESET]))
 			print('System was reset')
+			#graphing
+			g_x_data, g_y_data = [], []
+			g_sample_count = 0
 		else:
 			print('Did not reset system')
 
@@ -123,6 +154,9 @@ async def run(argv): # BLE comms
 				await client.write_gatt_char(CRTL_CHARACTERISTIC_UUID,  bytearray([CRTL_RESET]))
 				print('System was reset via OSC')
 				g_reset_requested = False
+				#graphing
+				g_x_data, g_y_data = [], []
+				g_sample_count = 0
 				
 			await asyncio.sleep(0.1)  # Shorter sleep for more responsive reset
 		
