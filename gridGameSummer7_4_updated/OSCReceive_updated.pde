@@ -4,7 +4,7 @@ void oscEvent(OscMessage msg) {
 }
 
 // Global variable for tile length, will need to adjust this based on physical tile size
-float tileLength = 0.3048; //assuming tile length = tile height = 1ft
+float tileLength = 0.5; //assuming tile length = tile height = 1ft
 boolean needsCalibration = false; //wait for new round to start
 Process pythonProcess = null;
 
@@ -15,8 +15,11 @@ class OSCReceiveClass {
   void handleOSC(OscMessage msg) {
     if (msg.checkAddrPattern("/position")) {
       if (msg.checkTypetag("ff")) {
-        sensorX = msg.get(0).floatValue();
-        sensorY = msg.get(1).floatValue();
+        float rawX = msg.get(0).floatValue();
+        float rawY = msg.get(1).floatValue();
+        //sensor uses aeronautics coordinate system so we have to swap x and y
+        sensorX=rawY;
+        sensorY=rawX;
         
         // Check if we need to calibrate, mnust do this at start of each new round
         if (needsCalibration) {
