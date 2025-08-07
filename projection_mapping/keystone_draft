@@ -1,0 +1,68 @@
+//test sketch using keystone library to map nxn grid to 2x2 ft
+//library takes a offscreen rendered graphic and distorts this in the cornerpin surface
+//every graphical output we want to have distorted needs to be called as a child of a PGraphics object
+
+//1. create a PGraphics object for each surface
+//2. create a CornerPinSurface object for each surface
+//3. initialize them
+//4. draw to your offscreen buffers
+//5. add them all to the surface.render(PGraphics) command.
+
+//s is save screen, l is load screen, c is edit cornerpins 
+
+import deadpixel.keystone.*; //use updated version of keystone
+//download here: https://github.com/davidbouchard/keystone/tree/master/src/deadpixel/keystone
+
+float GRID_WIDTH_FEET = 2.0;   // Physical width in feet
+float GRID_HEIGHT_FEET = 2.0;  // Physical height in feet
+int GRID_ROWS = 2;             // Number of grid rows
+int GRID_COLS = 2;             // Number of grid columns
+
+Keystone ks;
+CornerPinSurface surface;
+PGraphics offscreen;
+
+void setup() {
+ size(800, 600, P3D); //size of the sketch to our projectors output
+ ks = new Keystone(this);
+ surface = ks.createCornerPinSurface(400, 400, 20); //line that creates our corner pin surface
+ offscreen = createGraphics(400, 400, P3D); //size of the graphics we are going to generate within Processing
+}
+
+void draw() {
+  background(0);
+  
+  offscreen.beginDraw();
+  offscreen.background(0);
+  drawGrid();
+  offscreen.endDraw();
+  
+  surface.render(offscreen);
+}
+
+void drawGrid() {
+  offscreen.stroke(255);
+  offscreen.strokeWeight(2);
+  
+  float cellWidth = 400 / (float)GRID_COLS;
+  float cellHeight = 400 / (float)GRID_ROWS;
+  
+  // Draw vertical lines
+  for (int i = 0; i <= GRID_COLS; i++) {
+    float x = i * cellWidth;
+    offscreen.line(x, 0, x, 400);
+  }
+  
+  // Draw horizontal lines
+  for (int i = 0; i <= GRID_ROWS; i++) {
+    float y = i * cellHeight;
+    offscreen.line(0, y, 400, y);
+  }
+  
+}
+
+void keyPressed() {
+  if (key == 'c') ks.toggleCalibration(); 
+  if (key == 's') ks.save();
+  if (key == 'l') ks.load();
+}
